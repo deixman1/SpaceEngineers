@@ -1,0 +1,21 @@
+Double[] array = new Double[3];
+int i = 0;
+void Main() 
+{
+IMyProgrammableBlock Prog2 = GridTerminalSystem.GetBlockWithName("Prog2") as IMyProgrammableBlock;
+IMyRemoteControl RemCon =GridTerminalSystem.GetBlockWithName("RemCon") as IMyRemoteControl;
+ string words = RemCon.GetPosition().ToString();  
+  Echo(RemCon.GetPosition().ToString());
+        string [] split = words.Split(new Char [] {' ', ':', 'Z', 'X', 'Y', ',', '{', '}'});  
+  
+        foreach (string s in split) 
+        {  
+  
+            if (s.Trim() != "")  
+			{
+				array[i] = Convert.ToDouble(s);
+                Echo(array[i].ToString());  
+				i++;
+			}
+        } 
+}
