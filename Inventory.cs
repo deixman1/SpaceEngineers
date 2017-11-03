@@ -31,7 +31,7 @@
             }
         }
         foreach (string TypeItem in CountItems.Keys)
-            ListToWrite.Append("Кол-во "+ TypeItem + ": " + CountItems[TypeItem].ToString()+"\n");
+            ListToWrite.Append(TypeItem + ": " + CountItems[TypeItem].ToString()+"\n");
         panel.WritePublicText(ListToWrite.ToString());
 
     }
