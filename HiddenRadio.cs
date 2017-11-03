@@ -2,7 +2,7 @@
     public Program()
     {
         Ticks = 0;
-        Clock = 10;
+        Clock = 4;
     }
     public void Main(string args)
     {
