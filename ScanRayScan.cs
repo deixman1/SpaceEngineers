@@ -1,31 +1,34 @@
-    int Clock = 300;
+    int Clock = 1;
     int Tick = 0;
     bool runMode; // 0-stop, 1-test 
     IMyTimerBlock Timer;
-    IMyTextPanel TPDebug;
+    //IMyTextPanel TPDebug;
+    IMyRadioAntenna Antenna;
     List<IMyTerminalBlock> Cams;
     MyDetectedEntityInfo info;
+    List<string> BlackList = new List<string>();
     double SCAN_DISTANCE = 100;
     float PITCH;
     float PITCHChanges;
     float YAW;
     float YAWChanges;
     float step;
-    //Vector3D target = new Vector3D(65, 53, -499011);
-    Vector3D target = new Vector3D(128.65, 85.17, -498971.66);
 
 
     public Program()
     {
         Timer = GridTerminalSystem.GetBlockWithName("Timer") as IMyTimerBlock;
-        TPDebug = GridTerminalSystem.GetBlockWithName("TPDebug") as IMyTextPanel;
+        //TPDebug = GridTerminalSystem.GetBlockWithName("TPDebug") as IMyTextPanel;
+        Antenna = GridTerminalSystem.GetBlockWithName("Antenna") as IMyRadioAntenna;
         Cams = new List<IMyTerminalBlock>();
         GridTerminalSystem.GetBlocksOfType<IMyCameraBlock>(Cams);
-        PITCH = -10;
+        PITCH = -45;
         PITCHChanges = PITCH;
-        YAW = -10;
+        YAW = -45;
         YAWChanges = YAW;
-        step = 5;
+        step = 1;
+        BlackList.Add("Large Grid 3624");
+        BlackList.Add("Power of happy incest");
     }
 
     public void Main(string args)
@@ -57,9 +60,12 @@
             {
                 if (PITCHChanges >= Math.Abs(PITCH) && YAWChanges >= Math.Abs(YAW))
                 {
-                    TPDebug.WritePublicText(TPDebug.GetPublicText() + "\nDone");
-                    Timer.GetActionWithName("OnOff_Off").Apply(Timer);
-                    break;
+                    PITCHChanges = PITCH;
+                    YAWChanges = YAW;
+                    //TPDebug.WritePublicText(TPDebug.GetPublicText() + "\nDone");
+                    //StrSend.Append("\nDone");
+                    //Timer.GetActionWithName("OnOff_Off").Apply(Timer);
+                    //break;
                 }
                 RayCastway(cam);
             }
@@ -69,11 +75,15 @@
     public void RayCastway(IMyCameraBlock cam)
     {
         info = cam.Raycast(SCAN_DISTANCE, PITCHChanges, YAWChanges);
-        if (info.HitPosition.HasValue)
+        if (info.HitPosition.HasValue && BlackList.IndexOf(info.Name) == -1)
         {
-            TPDebug.WritePublicText(TPDebug.GetPublicText() + "{" + PITCHChanges.ToString("0.00") + " " + YAWChanges.ToString("0.00") + ", ");
-            TPDebug.WritePublicText(TPDebug.GetPublicText() + info.Name + ", " + Vector3D.Distance(cam.GetPosition(), info.HitPosition.Value).ToString("0.00") + ", " + info.Position.ToString("0.00"));
-            TPDebug.WritePublicText(TPDebug.GetPublicText() + "}\n");
+            StringBuilder ListToWrite = new StringBuilder();
+            ListToWrite.Append("{" + PITCHChanges.ToString("0.00") + " " + YAWChanges.ToString("0.00") + ", ");
+            ListToWrite.Append(info.Name + ", " + Vector3D.Distance(cam.GetPosition(), info.HitPosition.Value).ToString("0.00") + ", " + info.Position.ToString("0.00") + "}\n");
+            Antenna.TransmitMessage(ListToWrite.ToString());
+            //TPDebug.WritePublicText(TPDebug.GetPublicText() + "{" + PITCHChanges.ToString("0.00") + " " + YAWChanges.ToString("0.00") + ", ");
+            //TPDebug.WritePublicText(TPDebug.GetPublicText() + info.Name + ", " + Vector3D.Distance(cam.GetPosition(), info.HitPosition.Value).ToString("0.00") + ", " + info.Position.ToString("0.00"));
+            //TPDebug.WritePublicText(TPDebug.GetPublicText() + "}\n");
         }
         if (YAWChanges >= Math.Abs(YAW))
         {
@@ -100,3 +110,9 @@
     public void Save()
     {
     }
+//FOr Stantion
+/*
+    IMyRadioAntenna Antenna = GridTerminalSystem.GetBlockWithName("Antenna") as IMyRadioAntenna;
+    IMyTextPanel TPDebug = GridTerminalSystem.GetBlockWithName("TPDebug") as IMyTextPanel;
+    TPDebug.WritePublicText(TPDebug.GetPublicText() + args);
+*/
