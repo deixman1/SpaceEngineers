@@ -20,14 +20,25 @@ namespace Class4
     public sealed class Program : MyGridProgram
     {
 //////
-    //блок кабины и список блоков двигателей
-    IMyCockpit Cockpit;
-    IMyGyro Gyro;
-    List<IMyThrust> Thrusters;
-    Vector3D Home = new Vector3D(10,10,10);
+    /*
+    * Спасибо ему https://www.youtube.com/channel/UCBC9faYOxS0yBBSS3uOx7LQ
+    * Параметры
+    * Stop - остановка стыковки и удаление точек стыковки
+    * Pause - остановка стыковки без удаление точек
+    * Любой параметр - 1 запуск:Добовляется в список точек стыковок
+    *                  2 запуск:Запускает стыковку к заданой точке стыковки
+    * Без параметров
+    * Вывод Hello
+    */
+    List<IMyCockpit> Cockpits = new List<IMyCockpit>();
+    IMyCockpit MainCockpit;
+    List<IMyThrust> Thrusters = new List<IMyThrust>();
+    List<IMyGyro> Gyros = new List<IMyGyro>();
+    List<IMyShipConnector> Connectors = new List<IMyShipConnector>();
     WayPoint wayPointHome;
     List<WayPoint> waypoints = new List<WayPoint>();
     IMyTextSurface panel;
+    double MinPower;
     public class WayPoint : IEquatable<WayPoint>
     {
         public WayPoint(string name, Vector3D position, Matrix matrix, int id)
@@ -54,7 +65,7 @@ namespace Class4
         {
             return Id;
         }
-        public override string ToString()
+        /*public override string ToString()
         {
             return this.Name + ","
             + this.Position.X + ";" + this.Position.Y + ";" + this.Position.Z + ","
@@ -73,28 +84,191 @@ namespace Class4
             mat.Left = new Vector3(Convert.ToDouble(split[3]),Convert.ToDouble(split[4]),Convert.ToDouble(split[5]));
             mat.Up = new Vector3(Convert.ToDouble(split[6]),Convert.ToDouble(split[7]),Convert.ToDouble(split[8]));
             return new WayPoint(name,pos,mat,Convert.ToInt32(id));
+        }*/
+    }
+    public void stop()
+    {
+        foreach (IMyThrust Thruster in Thrusters)
+        {
+            Thruster.ThrustOverridePercentage = 0f;
+        }
+        foreach (IMyGyro Gyro in Gyros)
+        {
+            Gyro.Pitch = 0;
+            Gyro.Roll = 0;
+            Gyro.Yaw = 0;
+            Gyro.GyroOverride = false;
+        }
+        //Storage = "";
+        MainCockpit.DampenersOverride = true;
+        Runtime.UpdateFrequency = UpdateFrequency.None;
+    }
+    public void Run ()
+    {
+        GyroAngl();
+        CompensateWeight();
+        GridTerminalSystem.GetBlocksOfType<IMyShipConnector>(Connectors, (block) => (block.Status == MyShipConnectorStatus.Connectable));
+            if (Connectors.Count > 0)
+            {
+                Connectors[0].Connect();
+                stop();
+            }
+    }
+    public void Initialization()
+    {
+        GridTerminalSystem.GetBlocksOfType<IMyThrust>(Thrusters);
+        GridTerminalSystem.GetBlocksOfType<IMyGyro>(Gyros);
+        GridTerminalSystem.GetBlocksOfType<IMyCockpit>(Cockpits, (block) => block.IsUnderControl);
+        if(Cockpits.Count > 1)
+        {
+            foreach (IMyCockpit Cockpit in Cockpits)
+            {
+                if (Cockpit.IsMainCockpit)
+                    MainCockpit = Cockpit;
+            }
+        }
+        else
+        {
+            MainCockpit = Cockpits[0];
+        }
+        panel = MainCockpit.GetSurface(0);
+        CalMinPower();
+    }
+    public void CalMinPower ()
+    {
+        Matrix CockpitMatrix = new MatrixD();
+        Matrix ThrusterMatrix = new MatrixD();
+
+        MainCockpit.Orientation.GetMatrix(out CockpitMatrix);
+        double[] powerThrs = { 0, 0, 0, 0, 0, 0 };
+        /*double UpThrMax = 0;
+        double DownThrMax = 1;
+        double LeftThrMax = 2;
+        double RightThrMax = 3;
+        double ForwardThrMax = 4;
+        double BackwardThrMax = 5;*/
+
+        foreach (IMyThrust Thruster in Thrusters)
+        {
+            Thruster.Orientation.GetMatrix(out ThrusterMatrix);
+            //Y
+            if (ThrusterMatrix.Forward == CockpitMatrix.Up)
+            {
+                powerThrs[0] += Thruster.MaxEffectiveThrust;
+            }
+            else if (ThrusterMatrix.Forward == CockpitMatrix.Down)
+            {
+                powerThrs[1] += Thruster.MaxEffectiveThrust;
+            }
+            //X
+            else if (ThrusterMatrix.Forward == CockpitMatrix.Left)
+            {
+                powerThrs[2] += Thruster.MaxEffectiveThrust;
+            }
+            else if (ThrusterMatrix.Forward == CockpitMatrix.Right)
+            {
+                powerThrs[3] += Thruster.MaxEffectiveThrust;
+            }
+            //Z
+            else if (ThrusterMatrix.Forward == CockpitMatrix.Forward)
+            {
+                powerThrs[4] += Thruster.MaxEffectiveThrust;
+            }
+            else if (ThrusterMatrix.Forward == CockpitMatrix.Backward)
+            {
+                powerThrs[5] += Thruster.MaxEffectiveThrust;
+            }
+        }
+        MinPower = powerThrs.Min();
+    }
+    public void ThrusterOverride (Vector3D VectorHome, Vector3D VectorMove)
+    {
+        double ForwardThrust = (VectorHome+VectorMove).Dot(MainCockpit.WorldMatrix.Forward);
+        double LeftThrust = (VectorHome+VectorMove).Dot(MainCockpit.WorldMatrix.Left);
+        double UpThrust = (VectorHome+VectorMove).Dot(MainCockpit.WorldMatrix.Up);
+
+        double BackwardThrust = -ForwardThrust;
+        double RightThrust = -LeftThrust;
+        double DownThrust = -UpThrust;
+
+        Matrix CockpitMatrix = new MatrixD();
+        Matrix ThrusterMatrix = new MatrixD();
+
+        MainCockpit.Orientation.GetMatrix(out CockpitMatrix);
+        foreach (IMyThrust Thruster in Thrusters)
+        {
+            Thruster.Orientation.GetMatrix(out ThrusterMatrix);
+            //Y
+            if (ThrusterMatrix.Forward == CockpitMatrix.Up)
+            {
+                Thruster.ThrustOverride = (float)(UpThrust*Thruster.MaxEffectiveThrust);
+            }
+            else if (ThrusterMatrix.Forward == CockpitMatrix.Down)
+            {
+                Thruster.ThrustOverride = (float)(DownThrust*Thruster.MaxEffectiveThrust);
+            }
+            //X
+            else if (ThrusterMatrix.Forward == CockpitMatrix.Left)
+            {
+                Thruster.ThrustOverride = (float)(LeftThrust*Thruster.MaxEffectiveThrust);
+            }
+            else if (ThrusterMatrix.Forward == CockpitMatrix.Right)
+            {
+                Thruster.ThrustOverride = (float)(RightThrust*Thruster.MaxEffectiveThrust);
+            }
+            //Z
+            else if (ThrusterMatrix.Forward == CockpitMatrix.Forward)
+            {
+                Thruster.ThrustOverride = (float)(ForwardThrust*Thruster.MaxEffectiveThrust);
+            }
+            else if (ThrusterMatrix.Forward == CockpitMatrix.Backward)
+            {
+                Thruster.ThrustOverride = (float)(BackwardThrust*Thruster.MaxEffectiveThrust);
+            }
         }
     }
+    public void GyroAngl ()
+    {
+        foreach (IMyGyro Gyro in Gyros)
+        {
+            Gyro.GyroOverride = true;
+            Vector3D axisForward = wayPointHome.Matrix.Forward.Cross(MainCockpit.WorldMatrix.Forward);
+            Vector3D axisUp = wayPointHome.Matrix.Up.Cross(MainCockpit.WorldMatrix.Up);
+            Vector3D axisLeft = wayPointHome.Matrix.Left.Cross(MainCockpit.WorldMatrix.Left);
+            Vector3D axis = axisForward + axisUp + axisLeft;
+            float Roll = (float)axis.Dot(Gyro.WorldMatrix.Backward);
+            float Yaw = (float)axis.Dot(Gyro.WorldMatrix.Up);
+            float Pitch = (float)axis.Dot(Gyro.WorldMatrix.Right);
+            Gyro.Roll = Roll;
+            Gyro.Pitch = Pitch;
+            Gyro.Yaw = Yaw;
+        }
+    }
+    public void CompensateWeight()
+    {
 
-    //находим нужные блоки
+        Vector3D LinearVelocity = MainCockpit.GetShipVelocities().LinearVelocity;
+        double ShipMass = MainCockpit.CalculateShipMass().PhysicalMass;
+        double MinBoost = MinPower/ShipMass; //a = F/m минимальное ускорение коробля
+        double TimeBraking = LinearVelocity.Length()/MinBoost; //t = u/a время торможения
+        double BrakingWay = LinearVelocity.Length() * TimeBraking - ((MinBoost*(TimeBraking*TimeBraking))/2); //S = u*t-((a*t^2)/2) тормозной путь
+        Vector3D VectorMove = LinearVelocity + Vector3D.Normalize(LinearVelocity) * BrakingWay;
+
+        Vector3D VectorHome = (MainCockpit.GetPosition()-wayPointHome.Position);
+
+        ThrusterOverride(VectorHome, VectorMove);
+
+    }
     public Program()
     {
-        Cockpit = GridTerminalSystem.GetBlockWithName("MainCockpit") as IMyCockpit;
-        Gyro = GridTerminalSystem.GetBlockWithName("Gyro") as IMyGyro;
-        panel = Cockpit.GetSurface(0);
-        Thrusters = new List<IMyThrust>();
-        
+        Initialization();
     }
 
-    //в главной функции запускаем скрипт в рабочем режиме или останавливаем в зависимости от аргумента
     public void Main(string argument, UpdateType uType)
     {
-        Echo(Storage.Length.ToString());
-        GridTerminalSystem.GetBlocksOfType<IMyThrust>(Thrusters);
         if(uType==UpdateType.Update1)
         {
-            gyroAngl ();
-            CompensateWeight();
+            Run();
         }
         else
         {
@@ -107,18 +281,24 @@ namespace Class4
                 case "Pause":
                     stop();
                     break;
+                case "":
+                    Echo("Hello");
+                    break;
+                case null:
+                    Echo("Hello");
+                    break;
                 default:
+                    Initialization();
                     if (waypoints.Exists(x => x.Name == argument))
                     {
                         wayPointHome = waypoints.Find(x => x.Name.Contains(argument));
                         Runtime.UpdateFrequency = UpdateFrequency.Update1;
-                        gyroAngl();
-                        CompensateWeight();
+                        Run();
                     }
                     else
                     {
-                        Echo("add");
-                        waypoints.Add(new WayPoint(argument, Cockpit.GetPosition(), Cockpit.WorldMatrix, waypoints.Count));
+                        Echo("added");
+                        waypoints.Add(new WayPoint(argument, MainCockpit.GetPosition(), MainCockpit.WorldMatrix, waypoints.Count));
                     }
                     break;
             }
@@ -139,129 +319,7 @@ namespace Class4
         //panel.WriteText(outPrint);
         //Echo(Storage);
     }
-    public void stop()
-    {
-        foreach (IMyThrust Thruster in Thrusters)
-        {
-            Thruster.ThrustOverridePercentage = 0f;
-        }
-        //Storage = "";
-        Gyro.GyroOverride = false;
-        Cockpit.DampenersOverride = true;
-        Runtime.UpdateFrequency = UpdateFrequency.None;
-    }
-    public void gyroAngl ()
-    {
-        //panel.WriteText($"{wayPointHome.Matrix.Forward},{Cockpit.WorldMatrix.Forward}\n{wayPointHome.Matrix.Up},{Cockpit.WorldMatrix.Up}\n{wayPointHome.Matrix.Left},{Cockpit.WorldMatrix.Left}");
-        Gyro.GyroOverride = true;
-        Vector3D axisForward = wayPointHome.Matrix.Forward.Cross(Cockpit.WorldMatrix.Forward);
-        Vector3D axisUp = wayPointHome.Matrix.Up.Cross(Cockpit.WorldMatrix.Up);
-        Vector3D axisLeft = wayPointHome.Matrix.Left.Cross(Cockpit.WorldMatrix.Left);
-        Vector3D axis = axisForward + axisUp + axisLeft;
-        float Roll = (float)axis.Dot(Gyro.WorldMatrix.Backward);
-        float Yaw = (float)axis.Dot(Gyro.WorldMatrix.Up);
-        float Pitch = (float)axis.Dot(Gyro.WorldMatrix.Right);
-        Gyro.Roll = Roll;
-        Gyro.Pitch = Pitch;
-        Gyro.Yaw = Yaw;
-        panel.WriteText($"Pitch {Pitch},Yaw {Yaw},Roll {Roll}\n");
-    }
-    //это рабочая процедура скрипта. 
-    public void CompensateWeight()
-    {
-        Matrix CockpitMatrix = new MatrixD();
-        Matrix ThrusterMatrix = new MatrixD();
 
-        Cockpit.Orientation.GetMatrix(out CockpitMatrix);
-        double UpThrMax = 0;
-        double DownThrMax = 0;
-        double LeftThrMax = 0;
-        double RightThrMax = 0;
-        double ForwardThrMax = 0;
-        double BackwardThrMax = 0;
-
-        foreach (IMyThrust Thruster in Thrusters)
-        {
-            Thruster.Orientation.GetMatrix(out ThrusterMatrix);
-            //Y
-            if (ThrusterMatrix.Forward == CockpitMatrix.Up)
-            {
-                UpThrMax += Thruster.MaxEffectiveThrust;
-            }
-            else if (ThrusterMatrix.Forward == CockpitMatrix.Down)
-            {
-                DownThrMax += Thruster.MaxEffectiveThrust;
-            }
-            //X
-            else if (ThrusterMatrix.Forward == CockpitMatrix.Left)
-            {
-                LeftThrMax += Thruster.MaxEffectiveThrust;
-            }
-            else if (ThrusterMatrix.Forward == CockpitMatrix.Right)
-            {
-                RightThrMax += Thruster.MaxEffectiveThrust;
-            }
-            //Z
-            else if (ThrusterMatrix.Forward == CockpitMatrix.Forward)
-            {
-                ForwardThrMax += Thruster.MaxEffectiveThrust;
-            }
-            else if (ThrusterMatrix.Forward == CockpitMatrix.Backward)
-            {
-                BackwardThrMax += Thruster.MaxEffectiveThrust;
-            }
-        }
-
-        //Vector3D GravityVector = Cockpit.GetNaturalGravity();
-        Vector3D LinearVelocity = Cockpit.GetShipVelocities().LinearVelocity;
-        float ShipMass = Cockpit.CalculateShipMass().PhysicalMass;
-        //double distance = Math.Round((Cockpit.GetPosition()-Home).Length());
-        //Vector3D stopWay = ((GravityVector/10)*(GravityVector/10))*ShipMass;
-        Vector3D ShipWeight = LinearVelocity*ShipMass;
-
-        Vector3D VectorHome = (Cockpit.GetPosition()-wayPointHome.Position) * 0.1 * ShipMass;
-
-        double ForwardThrust = (VectorHome+ShipWeight).Dot(Cockpit.WorldMatrix.Forward);
-        double LeftThrust = (VectorHome+ShipWeight).Dot(Cockpit.WorldMatrix.Left);
-        double UpThrust = (VectorHome+ShipWeight).Dot(Cockpit.WorldMatrix.Up);
-
-        double BackwardThrust = -ForwardThrust;
-        double RightThrust = -LeftThrust;
-        double DownThrust = -UpThrust;
-        //panel.WriteText($"{distance}\n{GravityVector.Length().ToString()}\n{ShipWeight.ToString()}\nF{ForwardThrust}, L{LeftThrust},\nU{UpThrust}, B{BackwardThrust},\nR{RightThrust}, D{DownThrust}");
-
-        foreach (IMyThrust Thruster in Thrusters)
-        {
-            Thruster.Orientation.GetMatrix(out ThrusterMatrix);
-            //Y
-            if (ThrusterMatrix.Forward == CockpitMatrix.Up)
-            {
-                Thruster.ThrustOverride = (float)(UpThrust);
-            }
-            else if (ThrusterMatrix.Forward == CockpitMatrix.Down)
-            {
-                Thruster.ThrustOverride = (float)(DownThrust);
-            }
-            //X
-            else if (ThrusterMatrix.Forward == CockpitMatrix.Left)
-            {
-                Thruster.ThrustOverride = (float)(LeftThrust);
-            }
-            else if (ThrusterMatrix.Forward == CockpitMatrix.Right)
-            {
-                Thruster.ThrustOverride = (float)(RightThrust);
-            }
-            //Z
-            else if (ThrusterMatrix.Forward == CockpitMatrix.Forward)
-            {
-                Thruster.ThrustOverride = (float)(ForwardThrust);
-            }
-            else if (ThrusterMatrix.Forward == CockpitMatrix.Backward)
-            {
-                Thruster.ThrustOverride = (float)(BackwardThrust);
-            }
-        }
-    }
 ///////
     }
     
